@@ -1,0 +1,3 @@
+(sym_lib_table
+  (lib (name TA8-FDC-rescue)(type Legacy)(uri ${KIPRJMOD}/TA8-FDC-rescue.lib)(options "")(descr ""))
+)
