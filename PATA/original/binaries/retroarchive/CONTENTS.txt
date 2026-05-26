@@ -1,0 +1,67 @@
+cis-cobol.imd
+  | (PF handwriting)
+  | CIS COBOL
+  | MASTER
+  | 28/4/86
+
+  Both sides (CP/M alpha):
+    cobol.com cobol.i01 cobol.i02 cobol.i03 cobol.i04
+    consol.int consol.lst pip.com stat.com
+
+cpm-utilities.imd
+  | CP/M UTILITIES (handwritten)
+
+  Both sides (CP/M alpha):
+    asm.com bios.asm bios30.lst cbios.asm ddt.com deblock.asm
+    diskcopy.com disktype.com dump.com ed.com filecopy.com
+    load.com movcpmpc.com multfrm.com pcform.com pip.com
+    stat.com submit.com syscopy.com sysgen.com v.com width.com
+    xsub.com
+
+cpm-zcpr-autoload.imd
+  | (handwritten)
+  | CPM2.2 #34332
+  | with ZCPR ccp
+  | autoload MODSTART
+
+  Both sides (CP/M alpha):
+    
+
+cpm-zcpr.imd
+  | CPM2.2 #34532
+  | ZCPR ccp.
+  | (handwritten)
+
+  Both sides (CP/M alpha):
+    
+
+dbase-ii.imd
+  | (PF handwriting)
+  | DBASE II
+  | (MASTER)
+  | 4/4/86
+
+  Both sides (CP/M alpha):
+    blink.com dbase.com dbase.sub dbasemsg.txt dbaseovr.com
+    keygen.com pip.com start.com stat.com
+
+micro-prolog.imd
+  | (PF handwriting)
+  | MICRO-PROLOG
+  | (MASTER)
+  | 4/4/86
+
+  Both sides (CP/M alpha):
+    b.log deftrap.log editor.log errtrap.log exptran.log
+    exrel.log micro.log mitsi.log modules.log program.log
+    prolog.com prolog.sym simple.log simtrace.log spytrace.log
+    told.log trace.log user.log
+
+zasm-zsid.imd
+  | (PF handwriting)
+  | ZASM & ZSID
+  | (MASTER)
+
+  Both sides (CP/M alpha):
+    link.com link.doc link.txt patch1.zsm readme zasm.com
+    zsid.com
