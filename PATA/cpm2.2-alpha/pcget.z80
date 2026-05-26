@@ -1,0 +1,292 @@
+;
+;  PCGET - This CP/M program receives a file from a PC via a serial 
+;  port and writes it to a file on the CP/M system. The file transfer uses
+;  the XMODEM protocol. 
+;
+;  Note this program is gutted from the Ward Christenson Modem program.
+;
+;  Hacked together by Mike Douglas for the Altair 2SIO serial interface board.
+;	Ver	Date		Desc
+;	1.0	11/7/12		Initial version
+;	1.1 2/20/14		Allow transfer to occur over 2SIO port B
+;	1.2 12/21/14	Send NAK immediately after file open to speed
+;					up the start-up of file transfer (four second
+;					delay otherwise).
+;	2.0	5/11/17		Update for CPUVille system
+;   3.0 3/12/2026 	Modified for TA Alphatronic PC
+;					UART BIOS calls
+;  					by Jukka Savolainen
+; TA Alphatronic BIOS subroutines
+bios_uart_rx_rdy:	.equ 	0E403h	; BIOS serial rx ready
+bios_uart_rd_byte:	.equ 	0E406h	; BIOS read from serial port
+bios_uart_wr_byte:	.equ 	0E409h	; BIOS write to serial port 
+bios_uart_tx_rdy:	.equ	0E433h	; BIOS serial transmit ready
+;  Transfer related equates
+SOH:	.EQU	1
+EOT:	.EQU	4
+ACK:	.EQU	6
+NAK:	.EQU	15H
+CTRLC:	.EQU	3		;Control-C
+LF:		.EQU	10
+CR:		.EQU	13
+		.ORG	100H
+;  Verify a file name was specified
+	ld a,(PARAM1)		;A=1st character of parameter 1
+	cp a,' '			;make sure something entered
+	jp nz,doXfer
+	ld de,mHelp		;display usage message
+	ld c,PRINT
+	call BDOS
+	ret					;return to CPM
+	
+;  doXfer - Switch to local stack and do the transfer
+doXfer:
+	ld de,mSendA	;port a send message
+	ld hl,0			;HL=0
+	add hl,sp			;HL=STACK FROM CP/M
+	ld (STACK),hl		;..SAVE IT
+	ld sp,STACK	;SP=MY STACK
+	xor a,a
+	ld (SECTNO),a		;init sector number to zero
+	call INIT_ACIA	;MASTER RESET THE ACIA
+	ld c,PRINT		;print the send message
+	call BDOS		;PRINT ID MESSAGE
+;  GOBBLE UP GARBAGE CHARS FROM THE LINE
+purge:	ld b,1				;times out after 1 second if no data
+	call RECV
+	jp c,RECEIVE_FILE	;line is clear, go receive the file
+	cp a,CTRLC			;exit if abort requested
+	jp z,abort
+	 jp purge
+;
+;**************RECEIVE FILE****************
+;
+RECEIVE_FILE:
+	call ERASE_OLD_FILE
+	call MAKE_NEW_FILE
+	ld a,NAK
+	call SEND		;SEND NAK
+RECV_LOOP:
+RECV_HDR:
+	ld b,3			;3 SEC TIMEOUT
+	call RECV
+	jp nc,RHNTO		;NO TIMEOUT
+RECV_HDR_TIMEOUT:
+RECV_SECT_ERR:			;PURGE THE LINE OF INPUT CHARS
+	ld b,1			;1 SEC W/NO CHARS
+	call RECV
+	jp nc,RECV_SECT_ERR ;LOOP UNTIL SENDER DONE
+	ld a,NAK
+	call SEND		;SEND NAK
+	 jp RECV_HDR
+;GOT CHAR - MUST BE SOH OR CTRL-C TO ABORT
+RHNTO:
+	cp a,SOH
+	jp z,GOT_SOH
+	cp a,CTRLC			;control-c to abort?
+	jp z,abort
+	cp a,EOT
+	jp z,GOT_EOT
+	 jp RECV_SECT_ERR
+GOT_SOH:
+	ld b,1
+	call RECV
+	jp c,RECV_HDR_TIMEOUT
+	ld d,a		;D=BLK #
+	ld b,1
+	call RECV	;GET CMA'D SECT #
+	jp c,RECV_HDR_TIMEOUT
+	cpl
+	cp a,d		;GOOD SECTOR #?
+	jp z,RECV_SECTOR
+	 jp RECV_SECT_ERR
+;  Receive Sector
+RECV_SECTOR:
+	ld a,d		;GET SECTOR #
+	ld (RSECTNO),a
+	ld c,0		;INIT CKSUM
+	ld hl,80H	;POINT TO BUFFER
+RECV_CHAR:
+	ld b,1		;1 SEC TIMEOUT
+	call RECV		;GET CHAR
+	jp c,RECV_HDR_TIMEOUT
+	ld (hl),a		;STORE CHAR
+	inc l		;DONE?
+	jp nz,RECV_CHAR
+;VERIFY CHECKSUM
+	ld d,c		;SAVE CHECKSUM
+	ld b,1		;TIMEOUT
+	call RECV	;GET CHECKSUM
+	jp c,RECV_HDR_TIMEOUT
+	cp a,d		;CHECK
+	jp nz,RECV_SECT_ERR
+;
+;GOT A SECTOR, WRITE IF = 1+PREV SECTOR
+;
+	ld a,(RSECTNO)
+	ld b,a		;SAVE IT
+	ld a,(SECTNO)	;GET PREV
+	inc a		;CALC NEXT SECTOR #
+	cp a,b		;MATCH?
+	jp nz,DO_ACK
+;GOT NEW SECTOR - WRITE IT
+	ld de,FCB
+	ld c,WRITE
+	call BDOS
+	or a,a
+	jp nz,WRITE_ERROR
+	ld a,(RSECTNO)
+	ld (SECTNO),a		;UPDATE SECTOR #
+DO_ACK:
+	ld a,ACK
+	call SEND
+	 jp RECV_LOOP
+WRITE_ERROR:
+	call ERXIT
+	.DB	13,10,10,"Error Writing File",13,10,'$'
+GOT_EOT:
+	ld a,ACK		;ACK THE EOT
+	call SEND
+	ld de,FCB
+	ld c,CLOSE
+	call BDOS
+	inc a
+	jp nz,XFER_CPLT
+	call ERXIT
+	.DB	13,10,10,"Error Closing File",13,10,'$'
+;
+ERASE_OLD_FILE:
+	ld de,FCB
+	ld c,SRCHF		;SEE IF IT EXISTS
+	call BDOS
+	inc a			;FOUND?
+	ret z					;NO, RETURN
+ERAY:
+	ld de,FCB
+	ld c,ERASE
+	call BDOS
+	ret
+;
+MAKE_NEW_FILE:
+	ld de,FCB
+	ld c,MAKE
+	call BDOS
+	inc a			;FF=BAD
+	ret nz					;OPEN OK
+;DIRECTORY FULL - CAN'T MAKE FILE
+	call ERXIT
+	.DB	13,10,10,"Error - Cannot Make File",13,10
+	.DB	"(directory must be full)",13,10,'$'
+;----------------------------------
+;
+; S U B R O U T I N E S
+;
+;----------------------------------
+;EXIT PRINTING MESSAGE FOLLOWING 'CALL ERXIT'
+ERXIT:
+	pop de			;GET MESSAGE
+	ld c,PRINT
+	call BDOS		;PRINT MESSAGE
+EXIT:
+	ld hl,(STACK)		;GET ORIGINAL STACK
+	ld sp,hl				;RESTORE IT
+;	RET					;--EXIT-- TO CP/M
+	 jp 0				; For interrupting system
+;----------------------------------
+;MODEM RECV
+;-------------------------------------
+RECV:
+	push de			;SAVE
+MSEC:	
+;	lxi	d,(159 shl 8)	;49 cycle loop, 6.272ms/wrap * 159 = 1 second
+	ld de,09F00H		;49 cycle loop, 6.272ms/wrap * 159 = 1 second
+;  port A input
+MWTI:	
+	call bios_uart_rx_rdy
+	jp nz,MCHAR
+	dec e			;COUNT DOWN
+	jp nz,MWTI		;FOR TIMEOUT
+	dec d
+	jp nz,MWTI
+	dec b			;DCR # OF SECONDS
+	jp nz,MSEC
+;MODEM TIMED OUT RECEIVING
+	pop de		;RESTORE D,E
+	scf				;CARRY SHOWS TIMEOUT
+	ret
+;GOT MODEM CHAR
+MCHAR:	
+	call bios_uart_rd_byte
+	pop de		;RESTORE DE
+	push af		;CALC CHECKSUM
+	add a,c
+	ld c,a
+	pop af
+	or a,a		;TURN OFF CARRY TO SHOW NO TIMEOUT
+	ret
+;GOT MODEM CHAR
+MCHARB:
+	call bios_uart_rd_byte
+	pop de		;RESTORE DE
+	push af		;CALC CHECKSUM
+	add a,c
+	ld c,a
+	pop af
+	or a,a		;TURN OFF CARRY TO SHOW NO TIMEOUT
+	ret
+;----------------------------------
+;MODEM SEND CHAR ROUTINE
+;----------------------------------
+;
+SEND:
+	push af		;CHECK IF MONITORING OUTPUT
+	add a,c		;CALC CKSUM
+	ld c,a
+SENDW:	
+	pop af		;GET CHAR
+	ld c,a
+	call bios_uart_wr_byte
+	ret
+; INITITIALIZE THE SERIAL PORT
+INIT_ACIA:
+	; boot rom initializes the UART, so we don't need to do anything here
+	; ... but we could add code here to change the baud rate, etc. if we wanted to
+	ret
+mSendA:	.db	"Send the file now using "
+	.db	"XMODEM...",'$'
+mHelp:	.db	CR,LF,"PCGET 3.0 for TA Alphatronic PC",CR,LF,LF
+	.db	"Usage: PCGET file.ext",CR,LF
+	.DB	'$'
+;DONE - CLOSE UP SHOP
+XFER_CPLT:
+	call ERXIT
+	.DB	13,10,10,"Transfer Complete",13,10,'$'
+abort:	call ERXIT
+	.db	13,10,10,"Transfer Aborted",13,10,'$'
+	.DS	40	;STACK AREA
+STACK:	.DS	2	;STACK POINTER
+RSECTNO:	.DS	1	;RECEIVED SECTOR NUMBER
+SECTNO:	.DS	1	;CURRENT SECTOR NUMBER 
+;
+; BDOS EQUATES (VERSION 2)
+;
+RDCON	.EQU	1
+WRCON	.EQU	2
+PRINT	.EQU	9
+CONST	.EQU	11	;CONSOLE STAT
+OPEN	.EQU	15	;0FFH=NOT FOUND
+CLOSE	.EQU	16	;   "	"
+SRCHF	.EQU	17	;   "	"
+SRCHN	.EQU	18	;   "	"
+ERASE	.EQU	19	;NO RET CODE
+READ	.EQU	20	;0=OK, 1=EOF
+WRITE	.EQU	21	;0=OK, 1=ERR, 2=?, 0FFH=NO DIR SPC
+MAKE	.EQU	22	;0FFH=BAD
+REN	.EQU	23	;0FFH=BAD
+STDMA	.EQU	26
+BDOS	.EQU	5
+REIPL	.EQU	0
+FCB	.EQU	5CH	;DEFAULT FCB
+PARAM1	.EQU	FCB+1	;COMMAND LINE PARAMETER 1 IN FCB
+PARAM2	.EQU	PARAM1+16	;COMMAND LINE PARAMETER 2
+	.END
